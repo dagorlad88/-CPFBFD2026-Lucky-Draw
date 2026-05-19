@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() { return request.auth != null; }
+    
+    function isValidParticipant(data) {
+      return data.keys().hasAll(['name', 'department', 'createdAt']) &&
+             data.keys().size() == 3 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.department is string && data.department.size() > 0 && data.department.size() <= 200 &&
+             data.createdAt == request.time;
+    }
+
+    match /Eligible_Pool/{participantId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidParticipant(request.resource.data);
+      allow delete: if isSignedIn();
+      allow list: if isSignedIn();
+      allow list: if isSignedIn() && request.query.limit <= 1000;
+    }
+
+    function isValidPrizeConfig(data) {
+      return data.keys().hasAll(['prizeNumber', 'prizeName', 'imageUrl', 'updatedAt']) &&
+             data.keys().size() == 4 &&
+             data.prizeNumber is string && data.prizeNumber.size() <= 100 &&
+             data.prizeName is string && data.prizeName.size() <= 200 &&
+             data.imageUrl is string && data.imageUrl.size() <= 2000 &&
+             data.updatedAt == request.time;
+    }
+
+    match /Config_Prizes/{prizeId} {
+      allow read, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidPrizeConfig(request.resource.data);
+      allow update: if isSignedIn() && 
+                    isValidPrizeConfig(request.resource.data) &&
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['prizeNumber', 'prizeName', 'imageUrl', 'updatedAt']);
+    }
+
+    function isValidAuditEntry(data) {
+      return data.keys().hasAll(['name', 'department', 'prize', 'prizeNumber', 'status', 'timestamp']) &&
+             data.keys().size() == 6 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.department is string && data.department.size() > 0 && data.department.size() <= 200 &&
+             data.prize is string && data.prize.size() <= 200 &&
+             data.prizeNumber is string && data.prizeNumber.size() <= 100 &&
+             data.status in ['Won', 'Voided'] &&
+             data.timestamp == request.time;
+    }
+
+    match /Audit_Log/{logId} {
+      allow read, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidAuditEntry(request.resource.data);
+      allow update: if isSignedIn() && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                    request.resource.data.status == 'Voided';
+      allow delete: if isSignedIn();
+    }
+  }
+}

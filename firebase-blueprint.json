@@ -1,0 +1,82 @@
+{
+  "entities": {
+    "Participant": {
+      "title": "Participant",
+      "description": "A person eligible to be drawn.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "department": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "timestamp"
+        }
+      },
+      "required": ["name", "department", "createdAt"]
+    },
+    "PrizeConfig": {
+      "title": "PrizeConfig",
+      "description": "Configuration for a Specific Prize.",
+      "type": "object",
+      "properties": {
+        "prizeNumber": {
+          "type": "string"
+        },
+        "prizeName": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "timestamp"
+        }
+      },
+      "required": ["prizeNumber", "prizeName", "imageUrl", "updatedAt"]
+    },
+    "AuditEntry": {
+      "title": "AuditEntry",
+      "description": "A record of a draw or redraw.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "department": {
+          "type": "string"
+        },
+        "prize": {
+          "type": "string"
+        },
+        "prizeNumber": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Won", "Voided"]
+        },
+        "timestamp": {
+          "type": "timestamp"
+        }
+      },
+      "required": ["name", "department", "prize", "prizeNumber", "status", "timestamp"]
+    }
+  },
+  "firestore": {
+    "Eligible_Pool/{participantId}": {
+      "schema": "Participant",
+      "description": "Main pool of eligible participants."
+    },
+    "Config_Prizes/{prizeId}": {
+      "schema": "PrizeConfig",
+      "description": "Configuration of the 15 top prizes."
+    },
+    "Audit_Log/{logId}": {
+      "schema": "AuditEntry",
+      "description": "Immutable audit trail of all draw actions."
+    }
+  }
+}

@@ -1,0 +1,166 @@
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@500&family=Space+Grotesk:wght@700&family=Spline+Sans:wght@700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Spline Sans", sans-serif;
+  --font-mono: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+
+  --color-surface: #111417;
+  --color-surface-dim: #111417;
+  --color-surface-bright: #37393d;
+  --color-surface-container-lowest: #0c0e12;
+  --color-surface-container-low: #191c1f;
+  --color-surface-container: #1d2023;
+  --color-surface-container-high: #282a2e;
+  --color-surface-container-highest: #323539;
+  --color-on-surface: #e1e2e7;
+  --color-on-surface-variant: #d0c6ae;
+  --color-inverse-surface: #e1e2e7;
+  --color-inverse-on-surface: #2e3134;
+  --color-outline: #99907b;
+  --color-outline-variant: #4d4634;
+  --color-surface-tint: #ebc23e;
+  --color-surface-variant: #323539;
+  
+  --color-primary: #fff5e1;
+  --color-on-primary: #3c2f00;
+  --color-primary-container: #ffd54f;
+  --color-on-primary-container: #735c00;
+  --color-inverse-primary: #735c00;
+
+  --color-secondary: #bdc2ff;
+  --color-on-secondary: #1b247f;
+  --color-secondary-container: #343d96;
+  --color-on-secondary-container: #a8afff;
+  
+  --color-tertiary: #f6f5f5;
+  --color-on-tertiary: #2f3131;
+  --color-tertiary-container: #d9d9d9;
+  --color-on-tertiary-container: #5d5f5f;
+  
+  --color-error: #ffb4ab;
+  --color-on-error: #690005;
+  --color-error-container: #93000a;
+  --color-on-error-container: #ffdad6;
+
+  --color-primary-fixed: #ffe087;
+  --color-primary-fixed-dim: #ebc23e;
+  --color-on-primary-fixed: #241a00;
+  --color-on-primary-fixed-variant: #574500;
+
+  --color-secondary-fixed: #e0e0ff;
+  --color-secondary-fixed-dim: #bdc2ff;
+  --color-on-secondary-fixed: #000767;
+  --color-on-secondary-fixed-variant: #343d96;
+
+  --color-tertiary-fixed: #e2e2e2;
+  --color-tertiary-fixed-dim: #c6c6c6;
+  --color-on-tertiary-fixed: #1a1c1c;
+  --color-on-tertiary-fixed-variant: #454747;
+
+  --color-background: #111417;
+  --color-on-background: #e1e2e7;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-on-background);
+  }
+  
+  button, input[type="button"], input[type="submit"], input[type="reset"], a, select, [role="button"] {
+    cursor: pointer !important;
+  }
+}
+
+@layer utilities {
+  .outer-glow-yellow {
+    box-shadow: 0 0 40px rgba(255, 213, 79, 0.4);
+  }
+  .outer-glow-yellow-intense {
+    box-shadow: 0 0 80px rgba(255, 213, 79, 0.7);
+  }
+  .glass-panel {
+    background-color: rgba(40, 42, 46, 0.8);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(153, 144, 123, 0.3);
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), inset 0 0 10px rgba(255, 255, 255, 0.05);
+  }
+  .scratch-card-gradient {
+    background: linear-gradient(45deg, #c0c0c0 0%, #e0e0e0 25%, #a0a0a0 50%, #e0e0e0 75%, #c0c0c0 100%);
+  }
+  .star-bg {
+    background-image: 
+        radial-gradient(circle at 15% 50%, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+        radial-gradient(circle at 85% 30%, rgba(255, 255, 255, 0.05) 2px, transparent 2px),
+        radial-gradient(circle at 50% 80%, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+    background-size: 100px 100px;
+  }
+  @keyframes shooting-star {
+    0% {
+      transform: translateX(100px) translateY(-100px) rotate(-45deg);
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateX(-1500px) translateY(1500px) rotate(-45deg);
+      opacity: 0;
+    }
+  }
+  .shooting-star {
+    position: absolute;
+    width: 150px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), rgba(255, 213, 79, 1));
+    border-radius: 50%;
+    filter: drop-shadow(0 0 6px rgba(255, 213, 79, 1));
+    animation: shooting-star linear infinite;
+  }
+  .shooting-star::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    right: 0;
+    width: 30px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 1));
+    border-radius: 50%;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 0.1; transform: scale(0.5); }
+    50% { opacity: 1; transform: scale(1.5); }
+  }
+  .twinkling-star {
+    position: absolute;
+    width: 3px;
+    height: 3px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 0 6px 1px rgba(255, 213, 79, 0.8);
+    animation: blink ease-in-out infinite alternate;
+  }
+  .text-glow {
+    text-shadow: 0 0 10px rgba(255, 213, 79, 0.3), 0 2px 4px rgba(0, 0, 0, 0.8);
+  }
+  .text-glow-sm {
+    text-shadow: 0 0 5px rgba(255, 213, 79, 0.3);
+  }
+  @keyframes breathing-glow {
+    0%, 100% {
+      box-shadow: 0 0 20px rgba(255, 213, 79, 0.3), inset 0 0 10px rgba(255, 213, 79, 0.1);
+      border-color: rgba(255, 213, 79, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 50px rgba(255, 213, 79, 0.8), inset 0 0 20px rgba(255, 213, 79, 0.3);
+      border-color: rgba(255, 213, 79, 0.9);
+    }
+  }
+  .animate-breathing-glow {
+    animation: breathing-glow 3s ease-in-out infinite;
+  }
+}
