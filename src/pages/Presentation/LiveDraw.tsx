@@ -1,10 +1,21 @@
-import { useState, useRef, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, writeBatch, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import React, { useState, useRef, useEffect } from 'react';
+import { collection, getDocs, doc, writeBatch, serverTimestamp, onSnapshot } from '../../lib/store';
 import { db } from '../../lib/firebase';
 import { ArrowRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
+import { mergeWithDefaultTop10 } from '../../lib/prizeDefaults';
+
+const normalizeParticipantName = (value: unknown) => String(value ?? '').trim().toLowerCase();
+const normalizeDocIdName = (value: unknown) => {
+  const raw = String(value ?? '');
+  try {
+    return normalizeParticipantName(decodeURIComponent(raw));
+  } catch {
+    return normalizeParticipantName(raw);
+  }
+};
 
 export function LiveDraw() {
   const [prizes, setPrizes] = useState<any[]>([]);
@@ -24,15 +35,16 @@ export function LiveDraw() {
   // Load prizes configuration
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'Config_Prizes'), (snap) => {
-      const pmap: any[] = [];
+      const incoming: Record<number, any> = {};
       snap.forEach(d => {
-        const data = d.data();
-        // Parse a numeric ID out of the prizeNumber (e.g. 'Prize #05' -> 5) for sorting purposes
-        const numMatch = String(data.prizeNumber).match(/\d+/);
-        const parsedId = numMatch ? parseInt(numMatch[0], 10) : 0;
-        
-        pmap.push({ _id: parsedId, originalId: d.id, ...data });
+        incoming[parseInt(d.id, 10)] = d.data();
       });
+      const merged = mergeWithDefaultTop10(incoming);
+      const pmap: any[] = Object.entries(merged).map(([slot, data]) => ({
+        _id: parseInt(slot, 10),
+        originalId: slot,
+        ...data,
+      }));
       // Filter to only include the Top 10 prizes, then sort by id descending (10 down to 1)
       const top10Prizes = pmap.filter((p: any) => p._id >= 1 && p._id <= 10);
       top10Prizes.sort((a: any, b: any) => b._id - a._id);
@@ -113,24 +125,48 @@ export function LiveDraw() {
       // 1. Pick a random winner
       const snap = await getDocs(collection(db, 'Eligible_Pool'));
       const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const winnerRegistrySnap = await getDocs(collection(db, 'Winner_Registry'));
+      const winnerRegistrySet = new Set(
+        winnerRegistrySnap.docs.map(d => normalizeDocIdName(d.id))
+      );
+      const wonNameSet = new Set(
+        auditLogs
+          .filter(log => log.status === 'Won' && log.name)
+          .map(log => normalizeParticipantName(log.name))
+      );
+      const poolCandidates = allDocs.filter((participant: any) => {
+        const normalizedName = normalizeParticipantName(participant.name);
+        return normalizedName && !wonNameSet.has(normalizedName);
+      });
+      let eligibleDocs = poolCandidates.filter((participant: any) => {
+        const normalizedName = normalizeParticipantName(participant.name);
+        return !winnerRegistrySet.has(normalizedName);
+      });
+
+      // Fallback for fresh-event uploads: stale winner registry should not block
+      // a non-empty eligible pool when current audit history has no conflict.
+      if (eligibleDocs.length === 0 && poolCandidates.length > 0) {
+        eligibleDocs = poolCandidates;
+      }
       
-      if (allDocs.length === 0) {
-        alert("The Eligible Pool is empty!");
+      if (eligibleDocs.length === 0) {
+        alert("No eligible participants left in the pool.");
         if (drumrollRef.current) drumrollRef.current.pause();
         setDrawing(false);
         return;
       }
       
-      const randomIdx = Math.floor(Math.random() * allDocs.length);
-      const selected = allDocs[randomIdx] as any;
+      const randomIdx = Math.floor(Math.random() * eligibleDocs.length);
+      const selected = eligibleDocs[randomIdx] as any;
+      const selectedNormalizedName = normalizeParticipantName(selected.name);
       
       const batch = writeBatch(db);
 
       // 2. Eradicate all instances of this name in pool
-      const q = query(collection(db, 'Eligible_Pool'), where('name', '==', selected.name));
-      const erSnap = await getDocs(q);
-      erSnap.forEach(d => {
-        batch.delete(doc(db, 'Eligible_Pool', d.id));
+      allDocs.forEach((entry: any) => {
+        if (normalizeParticipantName(entry.name) === selectedNormalizedName) {
+          batch.delete(doc(db, 'Eligible_Pool', entry.id));
+        }
       });
 
       // 3. Log into Audit_Log
@@ -139,11 +175,20 @@ export function LiveDraw() {
       batch.set(auditRef, {
         name: selected.name,
         department: selected.department,
+        nameKey: selectedNormalizedName,
         prize: prizeObj.prizeName,
         prizeNumber: prizeObj.prizeNumber,
         status: 'Won',
         timestamp: serverTimestamp()
       });
+
+      const winnerRegistryRef = doc(db, 'Winner_Registry', selectedNormalizedName);
+      batch.set(winnerRegistryRef, {
+        name: selected.name,
+        nameKey: selectedNormalizedName,
+        wonAt: serverTimestamp(),
+        source: 'LiveDraw'
+      }, { merge: true });
 
       await batch.commit();
 
@@ -375,6 +420,21 @@ function ScratchCardCanvas({ onReveal }: { onReveal: () => void }) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [cleared, setCleared] = useState(false);
   const [lastPos, setLastPos] = useState<{x: number, y: number} | null>(null);
+  const strokeCountRef = useRef(0);
+  const STROKES_TO_REVEAL = 2;
+
+  const revealCard = () => {
+    if (cleared) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    canvas.style.transition = 'opacity 0.5s ease-out';
+    canvas.style.opacity = '0';
+    setCleared(true);
+    setTimeout(() => {
+      onReveal();
+    }, 500);
+  };
   
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -450,9 +510,17 @@ function ScratchCardCanvas({ onReveal }: { onReveal: () => void }) {
   };
 
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+    if (cleared) return;
     setIsDrawing(true);
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    strokeCountRef.current += 1;
+    if (strokeCountRef.current >= STROKES_TO_REVEAL) {
+      revealCard();
+      return;
+    }
+
     const pos = getPointerPos(e, canvas);
     setLastPos(pos);
     scratch(pos, pos);
@@ -513,12 +581,7 @@ function ScratchCardCanvas({ onReveal }: { onReveal: () => void }) {
 
     if (percentCleared > 50) {
       // Auto clear the rest
-      canvas.style.transition = 'opacity 0.5s ease-out';
-      canvas.style.opacity = '0';
-      setCleared(true);
-      setTimeout(() => {
-        onReveal();
-      }, 500);
+      revealCard();
     }
   };
 

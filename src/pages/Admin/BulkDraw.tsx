@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, writeBatch, orderBy, limit, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, writeBatch, orderBy, limit, addDoc, serverTimestamp } from '../../lib/store';
 import { db } from '../../lib/firebase';
 import { Users, AlertTriangle, PlayCircle, Loader2 } from 'lucide-react';
 import Papa from 'papaparse';

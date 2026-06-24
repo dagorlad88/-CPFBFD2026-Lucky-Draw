@@ -1,27 +1,25 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../lib/firebase';
-import { cn } from '../lib/utils';
-import { Lock, Mail, ArrowRight, ShieldCheck } from 'lucide-react';
+import { useAuth } from '../lib/auth';
+import { Lock, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { loginWithPin } = useAuth();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    
+
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await loginWithPin(pin);
       navigate('/admin');
     } catch (err: any) {
-      setError(err.message || 'Failed to login');
+      setError(err.message || 'Invalid PIN');
     } finally {
       setLoading(false);
     }
@@ -52,38 +50,19 @@ export function Login() {
               </div>
             )}
             <div className="flex flex-col gap-2">
-              <label className="font-mono text-sm font-bold text-on-surface-variant uppercase tracking-wider" htmlFor="email">
-                Email Address
-              </label>
-              <div className="relative group rounded-lg border border-outline-variant bg-surface-container-low transition-all duration-300 focus-within:border-primary-container focus-within:shadow-[0_0_12px_rgba(255,213,79,0.3)]">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant w-5 h-5" />
-                <input 
-                  type="email" 
-                  id="email" 
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-transparent border-none text-on-surface font-sans text-base pl-10 pr-4 py-3 focus:outline-none placeholder:text-on-surface-variant/50" 
-                  placeholder="Please enter email address" 
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label className="font-mono text-sm font-bold text-on-surface-variant uppercase tracking-wider" htmlFor="password">
-                Password
+              <label className="font-mono text-sm font-bold text-on-surface-variant uppercase tracking-wider" htmlFor="pin">
+                Access PIN
               </label>
               <div className="relative group rounded-lg border border-outline-variant bg-surface-container-low transition-all duration-300 focus-within:border-primary-container focus-within:shadow-[0_0_12px_rgba(255,213,79,0.3)]">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant w-5 h-5" />
-                <input 
-                  type="password" 
-                  id="password" 
+                <input
+                  type="password"
+                  id="pin"
                   autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-transparent border-none text-on-surface font-sans text-base pl-10 pr-4 py-3 focus:outline-none placeholder:text-on-surface-variant/50" 
-                  placeholder="••••••••" 
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  className="w-full bg-transparent border-none text-on-surface font-sans text-base pl-10 pr-4 py-3 focus:outline-none placeholder:text-on-surface-variant/50"
+                  placeholder="Enter PIN to continue"
                   required
                 />
               </div>
