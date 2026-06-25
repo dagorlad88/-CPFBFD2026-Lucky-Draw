@@ -1,14 +1,14 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { auth } from '../lib/firebase';
-import { signOut } from 'firebase/auth';
+import { useAuth } from '../lib/auth';
 import { cn } from '../lib/utils';
 import { LayoutDashboard, Users, Gift, Dices, FileText, PlayCircle, LogOut } from 'lucide-react';
 
 export function AdminLayout() {
   const navigate = useNavigate();
+  const { logout, isMock } = useAuth();
 
-  const handleLogout = () => {
-    signOut(auth);
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 
@@ -79,8 +79,8 @@ export function AdminLayout() {
             LUCKY DRAW ADMIN
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm font-mono text-on-surface-variant">Connected to Firebase</span>
-            <div className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse"></div>
+            <span className="text-sm font-mono text-on-surface-variant">Local Storage</span>
+            <div className="w-2 h-2 rounded-full bg-[#10B981]"></div>
           </div>
         </header>
 

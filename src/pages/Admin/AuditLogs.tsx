@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, query, orderBy, onSnapshot, writeBatch, doc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, writeBatch, doc } from '../../lib/store';
 import { db } from '../../lib/firebase';
 import { Download, Filter, CheckCircle2, XCircle, Info as InfoIcon, Trash2 } from 'lucide-react';
 import Papa from 'papaparse';
