@@ -1,10 +1,15 @@
 /**
- * In-memory store replacing Firebase Firestore and Firebase Storage.
- * Exports a Firestore-compatible API so all existing page code works unchanged
- * (only the import path needs to change from 'firebase/firestore' to '../lib/store').
+ * Host-backed data store.
  *
- * Data is held in module-level Maps and survives React re-renders but is
- * cleared on full page reload — intentional for a self-contained demo.
+ * Exposes a Firestore-compatible API (the same surface the pages already
+ * import) but persists everything to the shared backend in server.js, which
+ * stores it in a SQLite file. This means ALL users see and maintain the SAME
+ * data — uploads, prize changes and draw results are no longer trapped in one
+ * browser's localStorage.
+ *
+ * Reads are cached in-memory per collection so query constraints and snapshot
+ * building stay synchronous; the cache is refreshed on every getDocs() and
+ * whenever the server pushes a change over Server-Sent Events.
  */
 
 // ==================== TYPES ====================
@@ -61,25 +66,22 @@ export interface StoreQuery {
 
 // ==================== INTERNAL STATE ====================
 
-const _collections = new Map<string, Map<string, DocumentData>>();
+const API_BASE = '/api';
+
+/** Client-side cache of the server data, keyed by collection path. */
+const _cache = new Map<string, Map<string, DocumentData>>();
 const _listeners = new Map<string, Set<() => void>>();
-const _fileStorage = new Map<string, string>(); // storagePath → data URL
+let _eventSource: EventSource | null = null;
 
-const STORE_COLLECTIONS_KEY = 'cpfbfd2026.store.collections';
-const STORE_FILES_KEY = 'cpfbfd2026.store.files';
-let _storageSyncInitialized = false;
-
-function canUseBrowserStorage(): boolean {
-  return typeof window !== 'undefined' && !!window.localStorage;
+function getCacheCollection(path: string): Map<string, DocumentData> {
+  if (!_cache.has(path)) _cache.set(path, new Map());
+  return _cache.get(path)!;
 }
 
+/** Re-attaches a `.toDate()` method to plain {seconds, nanoseconds} objects. */
 function reviveTimestampLike(value: any): any {
-  if (Array.isArray(value)) {
-    return value.map(reviveTimestampLike);
-  }
-  if (!value || typeof value !== 'object') {
-    return value;
-  }
+  if (Array.isArray(value)) return value.map(reviveTimestampLike);
+  if (!value || typeof value !== 'object') return value;
 
   const obj: any = { ...value };
   if (
@@ -93,93 +95,34 @@ function reviveTimestampLike(value: any): any {
   for (const key of Object.keys(obj)) {
     obj[key] = reviveTimestampLike(obj[key]);
   }
-
   return obj;
 }
 
-function persistStateToLocalStorage() {
-  if (!canUseBrowserStorage()) return;
-
-  const collectionsObj: Record<string, Record<string, DocumentData>> = {};
-  for (const [collectionPath, docs] of _collections.entries()) {
-    collectionsObj[collectionPath] = {};
-    for (const [docId, docData] of docs.entries()) {
-      collectionsObj[collectionPath][docId] = docData;
-    }
-  }
-
-  const filesObj: Record<string, string> = {};
-  for (const [storagePath, dataUrl] of _fileStorage.entries()) {
-    filesObj[storagePath] = dataUrl;
-  }
-
-  window.localStorage.setItem(STORE_COLLECTIONS_KEY, JSON.stringify(collectionsObj));
-  window.localStorage.setItem(STORE_FILES_KEY, JSON.stringify(filesObj));
-}
-
-function hydrateStateFromLocalStorage() {
-  if (!canUseBrowserStorage()) return;
-
-  const rawCollections = window.localStorage.getItem(STORE_COLLECTIONS_KEY);
-  const rawFiles = window.localStorage.getItem(STORE_FILES_KEY);
-
-  _collections.clear();
-  _fileStorage.clear();
-
-  if (rawCollections) {
+async function apiFetch(pathAndQuery: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(`${API_BASE}${pathAndQuery}`, init);
+  if (!res.ok && res.status !== 404) {
+    let detail = '';
     try {
-      const parsed = JSON.parse(rawCollections) as Record<string, Record<string, DocumentData>>;
-      for (const [collectionPath, docsObj] of Object.entries(parsed)) {
-        const docsMap = new Map<string, DocumentData>();
-        for (const [docId, docData] of Object.entries(docsObj || {})) {
-          docsMap.set(docId, reviveTimestampLike(docData));
-        }
-        _collections.set(collectionPath, docsMap);
-      }
+      const body = await res.clone().json();
+      detail = body?.error ? `: ${body.error}` : '';
     } catch {
-      // Ignore malformed persisted state and continue with empty store.
+      /* ignore */
     }
+    throw new Error(`Request failed (${res.status})${detail}`);
   }
-
-  if (rawFiles) {
-    try {
-      const parsed = JSON.parse(rawFiles) as Record<string, string>;
-      for (const [storagePath, dataUrl] of Object.entries(parsed)) {
-        _fileStorage.set(storagePath, dataUrl);
-      }
-    } catch {
-      // Ignore malformed persisted files and continue with empty file storage.
-    }
-  }
+  return res;
 }
 
-function notifyAllListeners() {
-  for (const collectionPath of _listeners.keys()) {
-    notifyListeners(collectionPath);
+/** Fetches a collection from the server and refreshes the local cache. */
+async function fetchCollection(path: string): Promise<Map<string, DocumentData>> {
+  const res = await apiFetch(`/collections/${encodeURIComponent(path)}`);
+  const json = (await res.json()) as { docs: Array<{ id: string; data: DocumentData }> };
+  const map = new Map<string, DocumentData>();
+  for (const { id, data } of json.docs) {
+    map.set(id, reviveTimestampLike(data));
   }
-}
-
-function initializeStorageSync() {
-  if (_storageSyncInitialized || !canUseBrowserStorage()) return;
-
-  hydrateStateFromLocalStorage();
-
-  window.addEventListener('storage', (event) => {
-    if (event.key !== STORE_COLLECTIONS_KEY && event.key !== STORE_FILES_KEY) return;
-    hydrateStateFromLocalStorage();
-    notifyAllListeners();
-  });
-
-  _storageSyncInitialized = true;
-}
-
-initializeStorageSync();
-
-function getCollection(path: string): Map<string, DocumentData> {
-  if (!_collections.has(path)) {
-    _collections.set(path, new Map());
-  }
-  return _collections.get(path)!;
+  _cache.set(path, map);
+  return map;
 }
 
 function applyConstraints(
@@ -210,7 +153,6 @@ function applyConstraints(
       result.sort((a, b) => {
         const aVal = a.data()[c.field!];
         const bVal = b.data()[c.field!];
-        // Support Timestamp objects (compare by .seconds)
         const aComp = aVal?.seconds !== undefined ? aVal.seconds : aVal;
         const bComp = bVal?.seconds !== undefined ? bVal.seconds : bVal;
         if (aComp === bComp) return 0;
@@ -231,14 +173,12 @@ function buildSnapshot(
   collectionPath: string,
   constraints: QueryConstraint[] = []
 ): QuerySnapshot {
-  const coll = getCollection(collectionPath);
-  let docs: QueryDocumentSnapshot[] = Array.from(coll.entries()).map(
-    ([id, data]) => ({
-      id,
-      exists: () => true,
-      data: () => ({ ...data }),
-    })
-  );
+  const coll = _cache.get(collectionPath) ?? new Map<string, DocumentData>();
+  let docs: QueryDocumentSnapshot[] = Array.from(coll.entries()).map(([id, data]) => ({
+    id,
+    exists: () => true,
+    data: () => ({ ...data }),
+  }));
 
   docs = applyConstraints(docs, constraints);
 
@@ -252,6 +192,29 @@ function buildSnapshot(
 
 function notifyListeners(collectionPath: string) {
   _listeners.get(collectionPath)?.forEach((cb) => cb());
+}
+
+/** Opens the SSE connection once; refreshes affected collections on change. */
+function ensureEventSource() {
+  if (_eventSource || typeof window === 'undefined' || typeof EventSource === 'undefined') {
+    return;
+  }
+  _eventSource = new EventSource(`${API_BASE}/events`);
+  _eventSource.onmessage = (event) => {
+    try {
+      const { collections } = JSON.parse(event.data) as { collections?: string[] };
+      for (const path of collections ?? []) {
+        if ((_listeners.get(path)?.size ?? 0) > 0) {
+          fetchCollection(path)
+            .then(() => notifyListeners(path))
+            .catch(() => { /* keep last known data */ });
+        }
+      }
+    } catch {
+      /* ignore malformed events */
+    }
+  };
+  // The browser reconnects automatically on error; nothing to do here.
 }
 
 function generateId(): string {
@@ -282,7 +245,7 @@ export function doc(
     };
   }
 
-  // Signature 2: doc(collRef, 'docId')  or  doc(collRef)  → auto ID
+  // Signature 2: doc(collRef, 'docId') or doc(collRef) -> auto ID
   if (dbOrRef?.__type === 'collection') {
     const autoId = pathOrId ?? generateId();
     return {
@@ -300,25 +263,14 @@ export function query(
   ref: CollectionReference,
   ...constraints: QueryConstraint[]
 ): StoreQuery {
-  return {
-    __type: 'query',
-    collectionPath: ref.path,
-    constraints,
-  };
+  return { __type: 'query', collectionPath: ref.path, constraints };
 }
 
-export function where(
-  field: string,
-  op: string,
-  value: any
-): QueryConstraint {
+export function where(field: string, op: string, value: any): QueryConstraint {
   return { __constraintType: 'where', field, op, value };
 }
 
-export function orderBy(
-  field: string,
-  direction: 'asc' | 'desc' = 'asc'
-): QueryConstraint {
+export function orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): QueryConstraint {
   return { __constraintType: 'orderBy', field, direction };
 }
 
@@ -340,6 +292,7 @@ export async function getDocs(
 ): Promise<QuerySnapshot> {
   const collPath = ref.__type === 'query' ? ref.collectionPath : ref.path;
   const constraints = ref.__type === 'query' ? ref.constraints : [];
+  await fetchCollection(collPath);
   return buildSnapshot(collPath, constraints);
 }
 
@@ -350,17 +303,33 @@ export function onSnapshot(
   const collPath = ref.__type === 'query' ? ref.collectionPath : ref.path;
   const constraints = ref.__type === 'query' ? ref.constraints : [];
 
-  if (!_listeners.has(collPath)) {
-    _listeners.set(collPath, new Set());
-  }
+  if (!_listeners.has(collPath)) _listeners.set(collPath, new Set());
 
   const listener = () => callback(buildSnapshot(collPath, constraints));
   _listeners.get(collPath)!.add(listener);
 
-  // Fire immediately (async to match Firebase behaviour)
-  setTimeout(listener, 0);
+  ensureEventSource();
+
+  // Initial load, then fire once with whatever we have.
+  fetchCollection(collPath)
+    .then(() => listener())
+    .catch(() => listener());
 
   return () => _listeners.get(collPath)?.delete(listener);
+}
+
+function applyLocalSet(
+  collectionPath: string,
+  id: string,
+  data: DocumentData,
+  merge?: boolean
+) {
+  const coll = getCacheCollection(collectionPath);
+  if (merge && coll.has(id)) {
+    coll.set(id, { ...coll.get(id), ...data });
+  } else {
+    coll.set(id, { ...data });
+  }
 }
 
 export async function setDoc(
@@ -368,14 +337,15 @@ export async function setDoc(
   data: DocumentData,
   options?: { merge?: boolean }
 ): Promise<void> {
-  initializeStorageSync();
-  const coll = getCollection(ref.collectionPath);
-  if (options?.merge && coll.has(ref.id)) {
-    coll.set(ref.id, { ...coll.get(ref.id), ...data });
-  } else {
-    coll.set(ref.id, { ...data });
-  }
-  persistStateToLocalStorage();
+  await apiFetch(
+    `/collections/${encodeURIComponent(ref.collectionPath)}/${encodeURIComponent(ref.id)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data, merge: !!options?.merge }),
+    }
+  );
+  applyLocalSet(ref.collectionPath, ref.id, data, options?.merge);
   notifyListeners(ref.collectionPath);
 }
 
@@ -383,10 +353,13 @@ export async function addDoc(
   ref: CollectionReference,
   data: DocumentData
 ): Promise<DocumentReference> {
-  initializeStorageSync();
-  const id = generateId();
-  getCollection(ref.path).set(id, { ...data });
-  persistStateToLocalStorage();
+  const res = await apiFetch(`/collections/${encodeURIComponent(ref.path)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data }),
+  });
+  const { id } = (await res.json()) as { id: string };
+  applyLocalSet(ref.path, id, data, false);
   notifyListeners(ref.path);
   return {
     __type: 'doc',
@@ -397,48 +370,50 @@ export async function addDoc(
 }
 
 export function writeBatch(_db: any) {
-  initializeStorageSync();
   const ops: Array<{
     type: 'set' | 'update' | 'delete';
-    ref: DocumentReference;
+    collection: string;
+    id: string;
     data?: DocumentData;
-    options?: { merge?: boolean };
+    merge?: boolean;
   }> = [];
 
   const batch = {
     set(ref: DocumentReference, data: DocumentData, options?: { merge?: boolean }) {
-      ops.push({ type: 'set', ref, data, options });
+      ops.push({ type: 'set', collection: ref.collectionPath, id: ref.id, data, merge: !!options?.merge });
       return batch;
     },
     update(ref: DocumentReference, data: DocumentData) {
-      ops.push({ type: 'update', ref, data });
+      ops.push({ type: 'update', collection: ref.collectionPath, id: ref.id, data });
       return batch;
     },
     delete(ref: DocumentReference) {
-      ops.push({ type: 'delete', ref });
+      ops.push({ type: 'delete', collection: ref.collectionPath, id: ref.id });
       return batch;
     },
     async commit() {
+      if (ops.length === 0) return;
+      await apiFetch('/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ops }),
+      });
+
       const affected = new Set<string>();
       for (const op of ops) {
-        const coll = getCollection(op.ref.collectionPath);
+        const coll = getCacheCollection(op.collection);
         if (op.type === 'set') {
-          if (op.options?.merge && coll.has(op.ref.id)) {
-            coll.set(op.ref.id, { ...coll.get(op.ref.id), ...op.data });
-          } else {
-            coll.set(op.ref.id, { ...op.data! });
-          }
+          if (op.merge && coll.has(op.id)) coll.set(op.id, { ...coll.get(op.id), ...op.data });
+          else coll.set(op.id, { ...op.data! });
         } else if (op.type === 'update') {
-          if (coll.has(op.ref.id)) {
-            coll.set(op.ref.id, { ...coll.get(op.ref.id), ...op.data });
-          }
+          if (coll.has(op.id)) coll.set(op.id, { ...coll.get(op.id), ...op.data });
         } else if (op.type === 'delete') {
-          coll.delete(op.ref.id);
+          coll.delete(op.id);
         }
-        affected.add(op.ref.collectionPath);
+        affected.add(op.collection);
       }
-      persistStateToLocalStorage();
       affected.forEach(notifyListeners);
+      ops.length = 0;
     },
   };
 
@@ -466,15 +441,10 @@ export interface UploadTaskSnapshot {
 }
 
 /**
- * Reads the file via FileReader, stores it as a base64 data URL in memory,
+ * Reads the file via FileReader, uploads it as a base64 data URL to the host,
  * then fires the progress / complete callbacks — matching the Firebase API.
  */
 export function uploadBytesResumable(storageRef: StorageReference, file: File) {
-  initializeStorageSync();
-  let _onProgress: ((snap: UploadTaskSnapshot) => void) | null = null;
-  let _onError: ((err: Error) => void) | null = null;
-  let _onComplete: (() => void) | null = null;
-
   const task = {
     on(
       _event: string,
@@ -482,21 +452,22 @@ export function uploadBytesResumable(storageRef: StorageReference, file: File) {
       onError: (err: Error) => void,
       onComplete: () => void
     ) {
-      _onProgress = onProgress;
-      _onError = onError;
-      _onComplete = onComplete;
-
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const dataUrl = e.target?.result as string;
-        _fileStorage.set(storageRef.path, dataUrl);
-        persistStateToLocalStorage();
-        _onProgress?.({ bytesTransferred: file.size, totalBytes: file.size });
-        _onComplete?.();
+        try {
+          await apiFetch('/files', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: storageRef.path, dataUrl }),
+          });
+          onProgress?.({ bytesTransferred: file.size, totalBytes: file.size });
+          onComplete?.();
+        } catch (err) {
+          onError?.(err as Error);
+        }
       };
-      reader.onerror = () => {
-        _onError?.(new Error('Failed to read file into memory'));
-      };
+      reader.onerror = () => onError?.(new Error('Failed to read file'));
       reader.readAsDataURL(file);
     },
     /** Exposed so PrizeSetup can call getDownloadURL(uploadTask.snapshot.ref) */
@@ -508,7 +479,8 @@ export function uploadBytesResumable(storageRef: StorageReference, file: File) {
 
 /** Returns the base64 data URL previously stored for this path. */
 export async function getDownloadURL(storageRef: StorageReference): Promise<string> {
-  const dataUrl = _fileStorage.get(storageRef.path);
-  if (!dataUrl) throw new Error(`No file stored at path: ${storageRef.path}`);
+  const res = await apiFetch(`/files?path=${encodeURIComponent(storageRef.path)}`);
+  if (res.status === 404) throw new Error(`No file stored at path: ${storageRef.path}`);
+  const { dataUrl } = (await res.json()) as { dataUrl: string };
   return dataUrl;
 }

@@ -6,3 +6,12 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# SQLite data store (host-side shared data)
+data/
+
+# Stray build/probe artifact (not part of the project)
+_probe_index.html
+
+# Local Claude Code settings (may contain secrets)
+.claude/
