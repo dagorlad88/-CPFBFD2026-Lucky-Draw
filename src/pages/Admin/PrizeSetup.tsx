@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
-import { collection, doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import React, { useState, useEffect } from 'react';
+import { collection, doc, setDoc, onSnapshot, serverTimestamp, ref, uploadBytesResumable, getDownloadURL } from '../../lib/store';
 import { db, storage } from '../../lib/firebase';
 import { CloudUpload, Info, Edit2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { mergeWithDefaultTop10 } from '../../lib/prizeDefaults';
 
 export function PrizeSetup() {
   const [selectedSlot, setSelectedSlot] = useState<number>(1);
@@ -22,7 +22,7 @@ export function PrizeSetup() {
       snap.forEach(doc => {
         pmap[parseInt(doc.id)] = doc.data();
       });
-      setPrizes(pmap);
+      setPrizes(mergeWithDefaultTop10(pmap));
     });
     return () => unsub();
   }, []);

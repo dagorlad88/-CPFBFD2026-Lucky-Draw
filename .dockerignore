@@ -1,0 +1,9 @@
+node_modules
+dist
+data
+data-test
+.git
+.env
+.env.*
+*.log
+_probe_index.html

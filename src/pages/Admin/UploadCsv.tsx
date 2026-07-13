@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import Papa from 'papaparse';
-import { collection, writeBatch, doc, serverTimestamp, getDocs } from 'firebase/firestore';
+import { collection, writeBatch, doc, serverTimestamp, getDocs } from '../../lib/store';
 import { db } from '../../lib/firebase';
 import { UploadCloud, CheckCircle, AlertCircle, Loader2, Trash2 } from 'lucide-react';
 
@@ -8,6 +8,29 @@ export function UploadCsv() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<{ type: 'idle'|'success'|'error'; message: string }>({ type: 'idle', message: '' });
+  const [uploadSummary, setUploadSummary] = useState<{
+    totalRows: number;
+    importedRows: number;
+    duplicateRows: number;
+    invalidRows: number;
+  } | null>(null);
+
+  const normalizeHeader = (value: string) =>
+    value
+      .replace(/^\uFEFF/, '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_-]+/g, '');
+
+  const getFieldValue = (row: Record<string, unknown>, expectedHeader: string) => {
+    const expected = normalizeHeader(expectedHeader);
+    for (const [header, rawValue] of Object.entries(row)) {
+      if (normalizeHeader(header) === expected) {
+        return String(rawValue ?? '').trim();
+      }
+    }
+    return '';
+  };
 
   const clearEligiblePool = async () => {
     if (!window.confirm("Are you SURE you want to clear the entire participants list? This removes all participants!")) return;
@@ -43,6 +66,7 @@ export function UploadCsv() {
       }
       
       setStatus({ type: 'success', message: 'Participants list removed successfully.' });
+      setUploadSummary(null);
     } catch (err: any) {
       setStatus({ type: 'error', message: `Failed to clear pool: ${err.message}` });
     } finally {
@@ -69,43 +93,63 @@ export function UploadCsv() {
       return;
     }
     setFile(f);
+    setUploadSummary(null);
     setStatus({ type: 'idle', message: '' });
   };
 
   const processFile = async () => {
     if (!file) return;
     setUploading(true);
+    setUploadSummary(null);
     setStatus({ type: 'idle', message: 'Parsing CSV...' });
 
-    Papa.parse<{ Name: string; Department: string }>(file, {
+    Papa.parse<Record<string, unknown>>(file, {
       header: true,
       skipEmptyLines: true,
+      transformHeader: (header) => header.replace(/^\uFEFF/, '').trim(),
       complete: async (results) => {
         try {
           setStatus({ type: 'idle', message: `Uploading ${results.data.length} records...` });
           
-          let validCount = 0;
+          let uniqueCount = 0;
+          let duplicateCount = 0;
+          let invalidRowCount = 0;
           let batch = writeBatch(db);
           let operationCounter = 0;
+          const seenNames = new Set<string>();
 
           // For robust uploading, Firestore batches can process 500 max at a time.
           for (const row of results.data) {
-            if (row.Name && row.Department) {
-              const docRef = doc(collection(db, 'Eligible_Pool'));
-              batch.set(docRef, {
-                name: String(row.Name).trim(),
-                department: String(row.Department).trim(),
-                createdAt: serverTimestamp(),
-              });
-              
-              validCount++;
-              operationCounter++;
+            const name = getFieldValue(row, 'Name');
+            const department = getFieldValue(row, 'Department');
+            if (!name || !department) {
+              invalidRowCount++;
+              continue;
+            }
 
-              if (operationCounter === 450) {
-                await batch.commit();
-                batch = writeBatch(db);
-                operationCounter = 0;
-              }
+            const normalizedName = name.toLowerCase();
+            if (seenNames.has(normalizedName)) {
+              duplicateCount++;
+              continue;
+            }
+
+            seenNames.add(normalizedName);
+            const uniqueDocId = encodeURIComponent(normalizedName);
+            const docRef = doc(db, 'Eligible_Pool', uniqueDocId);
+            batch.set(docRef, {
+              name,
+              department,
+              nameKey: normalizedName,
+              createdAt: serverTimestamp(),
+            });
+            
+            uniqueCount++;
+            operationCounter++;
+
+            if (operationCounter === 450) {
+              await batch.commit();
+              batch = writeBatch(db);
+              operationCounter = 0;
             }
           }
 
@@ -113,7 +157,24 @@ export function UploadCsv() {
             await batch.commit();
           }
 
-          setStatus({ type: 'success', message: `${validCount} valid records populated to Eligible Pool.` });
+          setUploadSummary({
+            totalRows: results.data.length,
+            importedRows: uniqueCount,
+            duplicateRows: duplicateCount,
+            invalidRows: invalidRowCount,
+          });
+
+          if (uniqueCount === 0) {
+            setStatus({
+              type: 'error',
+              message: "No valid rows found. Ensure your CSV has Name and Department columns with non-empty values.",
+            });
+            return;
+          }
+
+          const duplicateSummary = duplicateCount > 0 ? ` ${duplicateCount} duplicate names skipped.` : '';
+          const invalidSummary = invalidRowCount > 0 ? ` ${invalidRowCount} rows missing Name/Department skipped.` : '';
+          setStatus({ type: 'success', message: `${uniqueCount} unique records populated to Eligible Pool.${duplicateSummary}${invalidSummary}` });
         } catch (err: any) {
              // Extract detailed message from err if possible.
              let msg = err.message || 'Error occurred';
@@ -213,6 +274,30 @@ export function UploadCsv() {
                   <p className="text-sm font-sans opacity-90">{status.message}</p>
                </div>
              </div>
+          )}
+
+          {uploadSummary && (
+            <div className="mt-6 rounded-xl border border-outline/30 bg-surface-container-high p-5">
+              <h4 className="font-mono text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-4">Last Upload Summary</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="rounded-lg border border-outline/20 bg-surface-container px-3 py-2">
+                  <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-on-surface-variant">Rows Read</p>
+                  <p className="text-xl font-display font-black text-on-surface">{uploadSummary.totalRows}</p>
+                </div>
+                <div className="rounded-lg border border-[#10B981]/30 bg-[#10B981]/10 px-3 py-2">
+                  <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#10B981]">Imported</p>
+                  <p className="text-xl font-display font-black text-[#10B981]">{uploadSummary.importedRows}</p>
+                </div>
+                <div className="rounded-lg border border-outline/20 bg-surface-container px-3 py-2">
+                  <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-on-surface-variant">Duplicates Skipped</p>
+                  <p className="text-xl font-display font-black text-on-surface">{uploadSummary.duplicateRows}</p>
+                </div>
+                <div className="rounded-lg border border-error/30 bg-error/10 px-3 py-2">
+                  <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-error">Invalid Skipped</p>
+                  <p className="text-xl font-display font-black text-error">{uploadSummary.invalidRows}</p>
+                </div>
+              </div>
+            </div>
           )}
 
         </div>

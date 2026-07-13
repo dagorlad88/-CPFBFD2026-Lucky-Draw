@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getDocs } from '../../lib/store';
 import { db } from '../../lib/firebase';
 import { Users, Trophy, ClipboardCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
