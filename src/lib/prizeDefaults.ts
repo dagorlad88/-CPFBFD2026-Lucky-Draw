@@ -29,15 +29,15 @@ function rankLabel(slot: number): string {
 // Update these values directly to define the default designation/title for Rank 1-10.
 export const TOP10_PRIZE_TITLES: Record<number, string> = {
   1: 'iPhone 17 Pro 256GB',
-  2: 'Samsung Galaxy Tab S11 + Keyboard 256GB',
-  3: 'Apple Macbook Neo',
+  2: 'Samsung Galaxy Tab S11 256GB',
+  3: 'Macbook Neo, 256GB',
   4: 'Nintendo Switch 2',
-  5: 'Playstation 5 Digital Edition',
-  6: 'Insta360 X4 Air Starter Bundle',
-  7: '1 Night Stay at Hotel Ora with Breakfast for 2',
-  8: 'Samsung Galaxy Watch 8 LTE',
-  9: 'Shark Turbo Blade DC Standing Fan',
-  10: '2 x Singapore Oceanarium Tickets + $100 RWS Gift Vouchers',
+  5: 'Playstation 5 - Digital Version',
+  6: 'Insta360 X4 Starter Bundle',
+  7: '2D1N Stay and Breakfast for 2 at Hotel Ora',
+  8: 'Samsung Galaxy Watch 8 LTE 44MM',
+  9: 'Shark Turbo Blade TF200',
+  10: '$100 RWS Vouchers and 2 x Oceanarium Tickets',
 };
 
 export const DEFAULT_TOP10_PRIZES: Record<number, PrizeConfig> = Array.from(

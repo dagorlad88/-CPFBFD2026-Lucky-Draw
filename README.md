@@ -1,18 +1,31 @@
-# Run and deploy your  app
+# #CPFBFD2026 Lucky Draw
 
-This contains everything you need to run your app locally.
+## Prerequisites
 
-# Run and deploy the app
+- Node.js 18+
 
-This contains everything you need to run your app locally.
+## Run locally
 
+```bash
+npm install
+npm run dev
+```
 
-## Run Locally
+Open http://localhost:3000. Other devices on the same network (phone, iPad)
+can open the "Network" URL that Vite prints, e.g. `http://<your-lan-ip>:3000`.
 
-**Prerequisites:**  Node.js
+## Build for production
 
+```bash
+npm run build    # outputs to dist/
+```
 
-1. Install dependencies:
-   `npm install`
-2. Run the app:
-   `npm run dev`
+## How it works
+
+All data (participants, prizes, draw history, winner registry, uploaded images)
+is stored **in-memory** via `src/lib/store.ts` and persisted to the browser's
+`localStorage`. The store exposes a Firestore-compatible API so page code
+doesn't change.
+
+Because data lives in the browser, the admin setup and the live-draw
+presentation must run on the **same browser** (different tabs) to share data.

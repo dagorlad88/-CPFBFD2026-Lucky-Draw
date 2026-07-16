@@ -39,7 +39,7 @@ export default function App() {
             <Route path="audit" element={<AuditLogs />} />
           </Route>
 
-          <Route path="/stage" element={<ProtectedRoute><LiveDraw /></ProtectedRoute>} />
+          <Route path="/stage" element={<LiveDraw />} />
           
           <Route path="/" element={<Navigate to="/admin" />} />
         </Routes>
@@ -47,4 +47,3 @@ export default function App() {
     </AuthProvider>
   );
 }
-
