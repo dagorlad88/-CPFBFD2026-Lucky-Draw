@@ -469,19 +469,29 @@ function ScratchCardCanvas({ onReveal }: { onReveal: () => void }) {
        ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 3, 3);
     }
     
-    // Add text on top of foil
-    ctx.font = `900 ${rect.height * 0.2}px "Spline Sans", sans-serif`;
+    // Add text on top of foil.
+    const revealText = "SCRATCH TO REVEAL!";
+    // Start from a height-based size, then shrink it so the full text fits the
+    // card width (prevents clipping on narrower screens like iPad Mini).
+    let fontSize = rect.height * 0.18;
+    ctx.font = `900 ${fontSize}px "Spline Sans", sans-serif`;
+    const maxTextWidth = canvas.width * 0.85;
+    const measuredWidth = ctx.measureText(revealText).width;
+    if (measuredWidth > maxTextWidth) {
+      fontSize = fontSize * (maxTextWidth / measuredWidth);
+      ctx.font = `900 ${fontSize}px "Spline Sans", sans-serif`;
+    }
     ctx.fillStyle = '#FFD54F'; // primary-container
-    
+
     // Add a black outline/shadow to make it pop and look like the mockup
     ctx.shadowColor = 'rgba(0,0,0,0.8)';
     ctx.shadowBlur = 15;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 4;
-    
+
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText("SCRATCH TO REVEAL!", canvas.width / 2, canvas.height / 2);
+    ctx.fillText(revealText, canvas.width / 2, canvas.height / 2);
     
     // Reset shadow for further operations just in case
     ctx.shadowBlur = 0;
